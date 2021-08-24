@@ -42,6 +42,7 @@ The 2021 PARC Engineers League challenges the various teams to build a delivery 
 A graph based path planner plans the path to use. A combination of Lane Detection with OpenCV and obstacle avoidance is used to get to the locations set by the planner.
 
 To run the solution, run the following command (goal_x and goal_y are the coordinate goal, assumed to be 1.38 and 2.08 respectively if not provided):
+
 ` roslaunch parc_phase2_solution task_solution.launch goal_x:=<goal_x> goal_y:=<goal_y> `
 
 ## Challenges Faced

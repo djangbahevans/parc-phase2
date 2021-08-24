@@ -63,7 +63,7 @@ class ObstacleChecker:
         obs_p = []
         for point in self.obstacles:
             if -0.15 <= point[1] <= 0.15:  # robot is 178mm wide
-                # Obstacles should be less than 0.3 m away before being detected
+                # Obstacles should be less than or equal to 0.2 m away before being detected
                 if 0 <= point[0] <= .2:
                     obs_p.append(point)
                     obs = True

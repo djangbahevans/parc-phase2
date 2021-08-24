@@ -18,7 +18,7 @@
     <node name="obstacle_detector" pkg="parc_phase2_solution" type="obstacles_detector.py" output="screen" />
 
     <node name="line_extractor" pkg="laser_line_extraction" type="line_extraction_node">
-        <param name="~frequency" value="5" />
+        <param name="~frequency" value="30" />
         <param name="~frame_id" value="base_scan" />
         <param name="~scan_topic" value="scan" />
         <param name="~publish_markers" value="true" />

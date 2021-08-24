@@ -11,6 +11,7 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64MultiArray
 from tf.listener import TransformListener
 from tf.transformations import euler_from_quaternion
+from parc_phase2_solution.msg import Obstacle
 
 try:
     WALL_OFFSET = float(sys.argv[1])
@@ -33,6 +34,8 @@ class TargetCalculator:
 
         rospy.Subscriber("/line_segments", LineSegmentList, self.line_cb)
         rospy.Subscriber("/odom", Odometry, self.odom_cb)
+        rospy.Subscriber(
+            "/obstacle", Obstacle, self.obstacle_cb)
 
         self.target_pub = rospy.Publisher(
             "/lane_target", Float64MultiArray, queue_size=100)
@@ -40,6 +43,7 @@ class TargetCalculator:
         self.odom = {"x": 0, "y": 0, "theta": 0}
 
         self.line = None
+        self.obstacle = False
 
         rospy.timer.sleep(1)
         # while not rospy.is_shutdown():
@@ -58,7 +62,7 @@ class TargetCalculator:
 
         rospy.spin()
 
-    def odom_cb(self, msg: Odometry):
+    def odom_cb(self, msg):
         """Handles odometry messages
 
         Args:
@@ -73,9 +77,12 @@ class TargetCalculator:
         self.odom["theta"] = theta
         self.odom_start = True
 
-    def line_cb(self, msg: LineSegmentList):
+    def obstacle_cb(self, msg):
+        self.obstacle = msg.obstacle
+
+    def line_cb(self, msg):
         line_segs = msg.line_segments
-        if len(line_segs) == 0:
+        if len(line_segs) == 0 or self.obstacle:
             if self.line is None:
                 return
             line = self.line
@@ -84,12 +91,12 @@ class TargetCalculator:
             line_segs.sort(key=lambda line: abs(np.arctan2(
                 line.end[1] - line.start[1], line.end[0] - line.start[0])))
             self.line = line = line_segs[0]
+            # Convert line to global frame
+            self.start = self.transform_frame(
+                line.start, from_='base_footprint', to='odom')
+            self.end = self.transform_frame(
+                line.end, from_='base_footprint', to='odom')
 
-        # Convert line to global frame
-        self.start = self.transform_frame(
-            line.start, from_='base_footprint', to='odom')
-        self.end = self.transform_frame(
-            line.end, from_='base_footprint', to='odom')
         # Find slope and intercept of line
         m = self.calculate_slope(self.start, self.end)
         c = self.calculate_intercept(self.start, self.end)

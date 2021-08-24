@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 import sys
 from functools import reduce
-
+from time import time
 import actionlib
 import numpy as np
 import rospy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped, Twist
-from move_base_msgs.msg import MoveBaseAction, MoveBaseFeedback, MoveBaseGoal
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from nav_msgs.msg import Odometry
 from parc_phase2_solution.msg import Obstacle
 from std_msgs.msg import Bool, Float64MultiArray
@@ -20,9 +20,9 @@ from PID import PID
 try:
     goal_x = float(sys.argv[1])
     goal_y = float(sys.argv[2])
-    print(f"Moving to {(goal_x, goal_y)}")
+    rospy.loginfo("Moving to {0}".format((goal_x, goal_y)))
 except IndexError:
-    rospy.logerr("usage: rosrun obstacle_avoidance.py <goal_x> <goal_y>")
+    rospy.logerr("usage: rosrun task_solution.py <goal_x> <goal_y>")
 except ValueError as e:
     rospy.logfatal(str(e))
     rospy.signal_shutdown("Fatal error")
@@ -30,22 +30,13 @@ except ValueError as e:
 
 class TaskSolution:
     def __init__(self):
-        rospy.init_node("task1_solution")
+        rospy.init_node("task_solution")
         self.listener = TransformListener()
         self.listener.waitForTransform(
             "odom", "base_link", rospy.Time(), rospy.Duration(20))
 
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         self.client.wait_for_server()
-
-        self.odom_sub = rospy.Subscriber(
-            "/odom", Odometry, callback=self.odom_cb)
-        self.target_sub = rospy.Subscriber(
-            "/lane_target", Float64MultiArray, self.target_cb)
-        self.obstacle_sub = rospy.Subscriber(
-            "/obstacle", Obstacle, self.obstacle_cb)
-
-        self.vel_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 
         self.bridge = CvBridge()
         self.obstacle = False
@@ -57,12 +48,23 @@ class TaskSolution:
         self.target_start = False
         self.final = False
         self.traffic_green = False
+        self.time_since_last = np.inf
 
         self.graph = self.create_map()
         self.angle_pid = PID(Kp=1, Ki=0, Kd=0, setpoint=.22,
                              output_limits=(-.5, .5))
         self.speed_pid = PID(Kp=-.2, Ki=0, Kd=0, setpoint=0,
                              output_limits=(-.22, .22))
+
+        self.odom_sub = rospy.Subscriber(
+            "/odom", Odometry, callback=self.odom_cb)
+        self.target_sub = rospy.Subscriber(
+            "/lane_target", Float64MultiArray, self.target_cb)
+        self.obstacle_sub = rospy.Subscriber(
+            "/obstacle", Obstacle, self.obstacle_cb)
+
+        self.vel_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
+        self.obs_pub = rospy.Publisher("/obstacle", Obstacle, queue_size=10)
 
         while not (self.odom_start and self.target_start):
             if rospy.is_shutdown():
@@ -75,7 +77,7 @@ class TaskSolution:
         """Main loop of robot
         """
         # self.go_to_goal(self.p)
-        v: Vertex = self.graph.get_vertex("I")
+        v: Vertex = self.graph.get_vertex("J")
         first_point = self.find_first_point()
         (goal_node, _) = self.nearest_node(v.coordinates)
         path = self.find_shortest_path(
@@ -98,7 +100,7 @@ class TaskSolution:
                 path[i-1], p, how))
             self.go_to_intersection(v.coordinates, how)
 
-        self.cluttered_navigation((goal_x, goal_y))
+        # self.cluttered_navigation((goal_x, goal_y))
         rospy.logwarn("At destination")
 
     def go_to_intersection(self, p, how="lane"):
@@ -116,6 +118,7 @@ class TaskSolution:
                     self.keep_going(kind="lane", speed=.1)
                 else:
                     self.stop()
+                    self.store_current_heading()
                     obs_offset_local = self.determine_pos_of_obstacle()
                     obs_offset_global = self.transform_frame(
                         obs_offset_local, from_="base_link", to="odom")
@@ -123,20 +126,25 @@ class TaskSolution:
                         self.obs_point, from_="base_link", to="odom")
                     rospy.logwarn("Obstacle at {0}".format(true_obs_global))
 
-                    self.go_to_goal(obs_offset_global, speed=.03, distance=.01)
+                    self.go_to_goal(obs_offset_global, speed=.05, distance=.01)
 
+                    self.turn_to_goal(self.target)
                     while not self.obstacle_behind(obs_offset_global, offset=0.2):
                         if rospy.is_shutdown():
                             sys.exit()
-                        self.turn_to_heading(self.current_heading, speed=0)
-                        self.keep_going(kind="forward", speed=.03)
+                        # self.turn_to_heading(self.current_heading, speed=0)
+                        self.keep_going(kind="lane", speed=.05)
 
                     self.reset_obstacles()
             if how == "crossing":
                 self.stop()
                 self.turn_to_goal(p)
                 self.crossing(p)
-        self.go_to_goal(p, distance=0.1)
+            if how == "cluttered":
+                self.cluttered_navigation(p)
+                break
+        else:
+            self.go_to_goal(p, distance=0.1)
 
     def cluttered_navigation(self, destination):
         self.client.wait_for_server()
@@ -163,7 +171,6 @@ class TaskSolution:
             if rospy.is_shutdown():
                 sys.exit()
         traffic_sub.unregister()  # stop subscribing as soon as green detected
-        print("Traffic is green")
         self.go_to_goal(destination, distance=.1)
 
     def find_first_point(self):
@@ -185,6 +192,10 @@ class TaskSolution:
 
     def reset_obstacles(self):
         self.obstacle = False
+        self.time_since_last = time()
+        data = Obstacle()
+        data.obstacle = False
+        self.obs_pub.publish(data)
 
     def transform_frame(self, p, from_, to):
         """Converts a point from robot frame (base_link) to the global frame (odom)
@@ -383,8 +394,11 @@ class TaskSolution:
     def traffic_cb(self, msg):
         self.traffic_green = msg.data
 
-    def obstacle_cb(self, msg: Obstacle):
+    def obstacle_cb(self, msg):
         if self.obstacle:
+            return
+
+        if abs(time() - self.time_since_last) <= 1:
             return
 
         self.obstacle = msg.obstacle
@@ -405,16 +419,18 @@ class TaskSolution:
         self.odom["theta"] = theta
         self.odom_start = True
 
-    def target_cb(self, msg: Float64MultiArray):
+    def target_cb(self, msg):
         self.target = msg.data
         self.target_start = True
 
-    def feedback_cb(self, msg: MoveBaseFeedback):
+    def feedback_cb(self, msg):
         position_x = msg.base_position.pose.position.x
         position_y = msg.base_position.pose.position.y
-        if self.distance((position_x, position_y), (goal_x, goal_y)) < 2.5:  # Close enough
-            # self.client.cancel_all_goals()
-            rospy.logwarn("Nearly there...")
+        if self.distance((position_x, position_y), (goal_x, goal_y)) < 0.18:  # Close enough
+            # rospy.logwarn("At a distance of {0}".format(
+            #     self.distance((position_x, position_y), (goal_x, goal_y))))
+            self.client.cancel_all_goals()
+            self.turn_to_goal((goal_x, goal_y))
 
     def average_point(self, *points):
         """Calculates the average of points
@@ -500,6 +516,7 @@ class TaskSolution:
         g.add_vertex("G", (-1.70, 3.67))
         g.add_vertex("H", (1.70, 3.70))
         g.add_vertex("I", (-1.60, 2.16))
+        g.add_vertex("J", (goal_x, goal_y))
 
         g.add_edge("A", "B", "lane")
         g.add_edge("A", "C", "lane")
@@ -515,10 +532,12 @@ class TaskSolution:
         g.add_edge("E", "G", "lane")
 
         g.add_edge("F", "H", "lane")
+
         g.add_edge("G", "H", "lane")
+        g.add_edge("G", "I", "lane")
 
         g.add_edge("I", "E", "lane")
-        g.add_edge("G", "I", "lane")
+        g.add_edge("I", "J", "cluttered")
 
         return g
 

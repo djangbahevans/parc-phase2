@@ -28,4 +28,4 @@ obstacles_layer_laser:
         }
 
 inflation:
-    inflation_radius: 0.05
+    inflation_radius: 0.00

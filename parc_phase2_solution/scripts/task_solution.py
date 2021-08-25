@@ -77,7 +77,7 @@ class TaskSolution:
         """Main loop of robot
         """
         # self.go_to_goal(self.p)
-        v: Vertex = self.graph.get_vertex("J")
+        v = self.graph.get_vertex("J")
         first_point = self.find_first_point()
         (goal_node, _) = self.nearest_node(v.coordinates)
         path = self.find_shortest_path(
@@ -90,7 +90,7 @@ class TaskSolution:
             if i == len(path) - 1:
                 self.final = True
             p = path[i]
-            v: Vertex = self.graph.get_vertex(p)
+            v = self.graph.get_vertex(p)
             how = v.adjacent[self.graph.get_vertex(path[i-1])][1]
             h = np.arctan2(
                 (v.coordinates[1] - self.odom["y"]), (v.coordinates[0] - self.odom["x"]))

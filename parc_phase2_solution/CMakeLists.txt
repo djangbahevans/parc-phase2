@@ -11,7 +11,6 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   geometry_msgs
   nav_msgs
-  navigation
   rospy
   sensor_msgs
   tf

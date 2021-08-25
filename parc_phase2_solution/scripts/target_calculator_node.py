@@ -25,7 +25,7 @@ DISTANCE_AWAY = 1
 
 
 class TargetCalculator:
-    def __init__(self) -> None:
+    def __init__(self):
         rospy.init_node("target_calculator")
 
         self.listener = TransformListener()

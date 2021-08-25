@@ -11,7 +11,7 @@ from parc_phase2_solution.msg import Obstacle
 
 
 class ObstacleChecker:
-    def __init__(self) -> None:
+    def __init__(self):
         rospy.init_node("obstacle_detector")
         rospy.Subscriber("/scan", LaserScan, self.scan_cb)
         rospy.Subscriber("/odom", Odometry, self.odom_cb)

@@ -10,7 +10,7 @@ from std_msgs.msg import Bool
 
 
 class TrafficDetector:
-    def __init__(self) -> None:
+    def __init__(self):
         rospy.init_node("traffic_detector")
 
         self.image_sub = rospy.Subscriber(
